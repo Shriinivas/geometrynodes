@@ -1,3 +1,3 @@
-# geometrynodes
+# Geometry Nodes
 
-Blender Geometry Nodes
+Blender Geometry Node Examples & Utilities
