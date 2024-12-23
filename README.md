@@ -14,9 +14,10 @@ Contains parametric and polar plots that of epicycloid and Archimedes spiral; pr
 
 Creating pie charts using Blender geo nodes; project file of [this video tutorial](https://youtu.be/19ptQCVCak0). Also includes extended pie chart with up to 10 segments and various other parameters demonstrated in [this video](https://youtu.be/Ry8ySp-Fsmw)
 
-## measurement.blend (ver 4.3)
+## measurement.blend (Updated for Blender ver 4.3)
 
 Measure Angle & Measure Distance tools using geometry nodes; project file of [this video tutorial](https://youtu.be/zbFoJiug8Ss)
+Usage: Save the file in assets folder and drag the assets in viewport. Snap the edge vertices to the points you want to measure distance or angle between
 
 ## spring.demo
 
