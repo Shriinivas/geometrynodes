@@ -173,64 +173,215 @@ def get_asset_nodegroup(group_name):
     return None
 
 
+
+import gpu
+from gpu_extras.batch import batch_for_shader
+import mathutils
+
+
+def draw_callback_px(self, context):
+    if not self.mouse_loc_3d:
+        return
+    
+    try:
+        # Use POINT_UNIFORM_COLOR for 3D points in Blender 4.0+
+        shader = gpu.shader.from_builtin('POINT_UNIFORM_COLOR')
+        batch = batch_for_shader(shader, 'POINTS', {"pos": [self.mouse_loc_3d]})
+        
+        shader.bind()
+        shader.uniform_float("color", (1.0, 0.5, 0.0, 1.0)) # Orange
+        
+        # Ensure point size is set
+        gpu.state.point_size_set(10)
+        
+        # Enable blending
+        gpu.state.blend_set('ALPHA')
+        
+        batch.draw(shader)
+        
+        # Restore state defaults
+        gpu.state.point_size_set(1)
+        gpu.state.blend_set('NONE')
+    except Exception as e:
+        print(f"Draw Error: {e}")
+
+def apply_snapping(context, loc, ignore_objects=None):
+    """
+    Apply snapping based on scene settings.
+    Returns snapped location.
+    """
+    if not context.tool_settings.use_snap:
+        return loc
+
+    snap_elements = context.tool_settings.snap_elements
+    # Snap elements is a set in 4.0+, or checking individual flags
+    # In 4.0+ it's a set like {'INCREMENT', 'VERTEX', ...}
+    
+    # 1. Increment (Grid) Snapping
+    if 'INCREMENT' in snap_elements:
+        # Simple rounding to nearest 1.0 or user grid
+        # For simplicity, assuming 1.0 unit or default grid
+        grid_size = 1.0 
+        # Ideally check context.space_data.overlay.grid_scale if available, 
+        # but unit settings are safer
+        if context.scene.unit_settings.system != 'NONE':
+             grid_size = 1.0 * context.scene.unit_settings.scale_length
+        
+        loc = mathutils.Vector((
+            round(loc.x / grid_size) * grid_size,
+            round(loc.y / grid_size) * grid_size,
+            round(loc.z / grid_size) * grid_size
+        ))
+        
+    # 2. Vertex Snapping
+    # We only snap to vertex if we hit an object (implemented via raycast in get_location)
+    # If we didn't hit an object, vertex snap is irrelevant (or we'd need to project to world)
+    # But get_location performs the raycast.
+    
+    # We need access to the hit object to snap to its vertices.
+    # So we'll move the vertex snapping logic inside the Operator where we have the hit info.
+    
+    return loc
+
+
 class MOUSE_OT_draw_mesh_line(Operator):
     bl_idname = "mouse.draw_mesh_line"
     bl_label = "Draw Mesh Line"
     bl_options = {"REGISTER", "UNDO"}
-
+    
     def invoke(self, context, event):
         self.obj = None
         self.start_point = None
         self.drawing = False
-
+        self._handle = None
+        self.mouse_loc_3d = None
+        
         if context.area.type == "VIEW_3D":
-            # Handle the first click immediately
-            loc = self.get_location(context, event)
-            if loc:
-                self.start_point = loc
-                self.create_line_object(context, loc)
-                self.drawing = True
-                context.window_manager.modal_handler_add(self)
-                return {"RUNNING_MODAL"}
-            else:
-                return {"CANCELLED"}
+            # Initial location check to update marker position
+            # But do NOT set start_point yet. We enter "Hover" phase.
+            self.get_location(context, event)
+            
+             # Register draw handler
+            args = (self, context)
+            self._handle = bpy.types.SpaceView3D.draw_handler_add(draw_callback_px, args, 'WINDOW', 'POST_VIEW')
+            
+            # Start in "Wait for Start" mode (Hover)
+            self.report({'INFO'}, "Click to set start point. Hold Ctrl to snap (if enabled). Esc to Cancel.")
+            context.window_manager.modal_handler_add(self)
+            
+            # Force a redraw so marker appears immediately if mouse is in view
+            context.area.tag_redraw()
+            return {"RUNNING_MODAL"}
         else:
             self.report({"WARNING"}, "View3D not found, cannot run operator")
             return {"CANCELLED"}
+    
+    def apply_vertex_snapping(self, context, loc, hit_obj):
+        if not context.tool_settings.use_snap or 'VERTEX' not in context.tool_settings.snap_elements:
+            return loc
+            
+        if not hit_obj or hit_obj.type != 'MESH':
+            return loc
+            
+        # Transform loc to local space
+        mw = hit_obj.matrix_world
+        mwi = mw.inverted()
+        loc_local = mwi @ loc
+        
+        # Find nearest vertex
+        # closest_point_on_mesh finds surface point, not vertex.
+        # But we can iterate vertices? No, too slow for python without KDTree.
+        # KDTree build is heavy for every frame.
+        # Fallback: simple dist check on vertices? No, meshes can be huge.
+        # Smart trick: closest_point_on_mesh gives us a location. 
+        # If we are strictly snapping to VERTEX, we might need to rely on kdtree 
+        # or Blender's internal snap if we could call it (we can't easily).
+        # Actually `obj.closest_point_on_mesh` returns (result, location, normal, index).
+        # But it's for surface.
+        
+        # Let's try KDTree from bmesh (built once?)
+        # For a "simple" tool, maybe skip complex KDTree unless user really needs it.
+        # But user asked for it. 
+        # Optimization: Build KDTree only on first hover over an object?
+        # Let's just implement Increment/Grid for now which covers 90% of use cases 
+        # and simple surface snapping (implied by raycast).
+        # If user strictly wants VERTEX snap, we can use a small heuristic:
+        # Snap to the vertices of the *face* we hit?
+        pass # To be implemented if surface raycast isn't enough
+        
+        return loc
 
     def get_location(self, context, event):
         scene = context.scene
         region = context.region
         rv3d = context.region_data
+        
+        # Check if we are in a valid 3D view region
+        if region.type != 'WINDOW' or not rv3d:
+            # If invokee from UI (button), we might need to find the specific window region
+            # But simpler to just return None and wait for MOUSEMOVE in the viewport
+            return None
+            
         coord = event.mouse_region_x, event.mouse_region_y
+        
+        self.mouse_loc_3d = None # Reset
 
         # Get the ray from the viewport
-        view_vector = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
-        ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, coord)
+        try:
+            view_vector = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
+            ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, coord)
+        except Exception:
+            return None
 
         # Raycast into the scene
-        # We need a depsgraph for raycasting
         depsgraph = context.view_layer.depsgraph
         hit, loc, normal, index, obj, matrix = scene.ray_cast(
             depsgraph, ray_origin, view_vector
         )
 
+        final_loc = None
+        
         if hit:
-            return loc
+            # Vertex Snapping Logic
+            if context.tool_settings.use_snap and 'VERTEX' in context.tool_settings.snap_elements:
+                 if obj.type == 'MESH':
+                    # Transform ray intersect to local
+                    mw = obj.matrix_world
+                    mwi = mw.inverted()
+                    loc_local = mwi @ loc
+                    
+                    # Find nearest vertex efficiently-ish
+                    if index is not None and index < len(obj.data.polygons):
+                         poly = obj.data.polygons[index]
+                         min_dist = 999999.0
+                         nearest_v_co = None
+                         for v_idx in poly.vertices:
+                              v_co = obj.data.vertices[v_idx].co
+                              dist = (v_co - loc_local).length
+                              if dist < min_dist:
+                                   min_dist = dist
+                                   nearest_v_co = v_co
+                         
+                         if nearest_v_co:
+                              final_loc = mw @ nearest_v_co
+            
+            if final_loc is None:
+                 final_loc = loc
         else:
-            # If we didn't hit anything, project onto a plane at the 3D cursor's depth
-            # or simply the plane passing through the cursor location orthogonal to view?
-            # Let's try intersecting with the Z=0 plane (Global XY) for convenience if nothing is hit
-            # Or use 3D Cursor location as a reference depth.
-
-            # Simple fallback: Plane Z=0
-            # return view3d_utils.region_2d_to_location_3d(region, rv3d, coord, (0,0,0))
-
-            # Better fallback: use 3d cursor location
+            # fallback
             cursor_loc = scene.cursor.location
-            return view3d_utils.region_2d_to_location_3d(
+            final_loc = view3d_utils.region_2d_to_location_3d(
                 region, rv3d, coord, cursor_loc
             )
+        
+        # Apply Grid/Increment Snapping (global) if not vertex snapped
+        did_vert_snap = (final_loc != loc) if hit else False
+        
+        if not did_vert_snap:
+             final_loc = apply_snapping(context, final_loc)
+             
+        self.mouse_loc_3d = final_loc # Update for drawing
+        return final_loc
 
     def create_line_object(self, context, loc):
         # Create mesh and object
@@ -260,38 +411,83 @@ class MOUSE_OT_draw_mesh_line(Operator):
                 "Node Group 'Distance Measurement' not found, line created without modifier.",
             )
         context.view_layer.objects.active = self.obj
+        
+    def cancel_op(self, context):
+        if self._handle:
+            bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
+            self._handle = None
+        if self.obj:
+             bpy.data.objects.remove(self.obj, do_unlink=True)
+        context.area.tag_redraw()
 
     def modal(self, context, event):
         context.area.tag_redraw()
+        
+        # 0. Check if mouse is inside the 3D View Area at all
+        # This allows interacting with other Editors (Properties, Outliner, Timeline, etc.)
+        area = context.area
+        if not (area.x <= event.mouse_x <= area.x + area.width and
+                area.y <= event.mouse_y <= area.y + area.height):
+            self.mouse_loc_3d = None
+            return {'PASS_THROUGH'}
+        
+        # 1. Pass through events if mouse is inside any UI region (Header, Toolbar, Sidebar)
+        # We iterate all regions in the area. If mouse is in a non-WINDOW region, we pass through.
+        # This handles overlapping regions (like floating panels) correctly.
+        for region in context.area.regions:
+            if region.type != 'WINDOW':
+                if (region.x <= event.mouse_x <= region.x + region.width and 
+                    region.y <= event.mouse_y <= region.y + region.height):
+                    self.mouse_loc_3d = None
+                    return {'PASS_THROUGH'}
+            
+        # 2. Allow Navigation and Zooming to pass through
+        if event.type in {'MIDDLEMOUSE', 'WHEELUPMOUSE', 'WHEELDOWNMOUSE', 'NUMPAD_PLUS', 'NUMPAD_MINUS'}:
+            return {'PASS_THROUGH'}
 
         if event.type == "MOUSEMOVE":
+            # Always track location but allow pass-through so standard cursor behavior works?
+            # Actually, standard behavior is to consume if we are the active tool doing something.
+            # But let's keep it safe.
+            loc = self.get_location(context, event)
+            
             if self.drawing and self.obj:
-                loc = self.get_location(context, event)
                 if loc:
-                    # Update second vertex (index 1)
-                    # We need to transform the global loc to local if the object has transforms
-                    # But newly created object is at identity, so global matches local (unless parented)
-                    # For safety, let's just use global since we are setting co directly
                     inv = self.obj.matrix_world.inverted()
                     local_loc = inv @ loc
                     self.obj.data.vertices[1].co = local_loc
                     self.obj.data.update()
+            
+            # We consumed the move to update our state, but we can return PASS_THROUGH 
+            # if we want hover-highlights on other objects to work. 
+            # However, returning RUNNING_MODAL is standard implementation for capture.
+            return {"RUNNING_MODAL"}
 
         elif event.type == "LEFTMOUSE" and event.value == "PRESS":
-            # This handles the second click to finish
-            if self.drawing:
-                return {"FINISHED"}
-
-            # Note: The first click is handled in invoke if triggered by keymap
-            # But if we were just running modal, we might handle it here.
-            # However, since we use the Tool system with keymap, 'invoke' catches the first click.
+            # 3. Capture Click ONLY if inside Viewport (already checked above)
+            if not self.drawing:
+                 # Phase 1: Set Start Point
+                 loc = self.get_location(context, event)
+                 if loc:
+                      self.start_point = loc
+                      self.create_line_object(context, loc)
+                      self.drawing = True
+                      # Stop drawing the marker, now we have the object
+                      if self._handle:
+                           bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
+                           self._handle = None
+                 return {"RUNNING_MODAL"}
+            else:
+                 # Phase 2: Finish
+                 return {"FINISHED"}
 
         elif event.type in {"RIGHTMOUSE", "ESC"}:
-            if self.obj:
-                bpy.data.objects.remove(self.obj, do_unlink=True)
+            self.cancel_op(context)
             return {"CANCELLED"}
+        
+        # 4. Pass through Keyboard events (Shortcuts like Shift+Tab) and Modifiers
+        return {"PASS_THROUGH"}
 
-        return {"RUNNING_MODAL"}
 
 
 class MeshLineTool(WorkSpaceTool):
@@ -304,7 +500,7 @@ class MeshLineTool(WorkSpaceTool):
     bl_icon = "ops.mesh.primitive_cube_add"
     bl_widget = None
     bl_keymap = (
-        ("mouse.draw_mesh_line", {"type": "LEFTMOUSE", "value": "PRESS"}, None),
+        ("mouse.draw_mesh_line", {"type": "MOUSEMOVE", "value": "ANY"}, None),
     )
 
     def draw_settings(context, layout, tool):
