@@ -363,7 +363,19 @@ class MOUSE_OT_draw_mesh_line(Operator):
                                    nearest_v_co = v_co
                          
                          if nearest_v_co:
-                              final_loc = mw @ nearest_v_co
+                              # Check screen space distance to avoid aggressive snapping
+                              world_v_co = mw @ nearest_v_co
+                              screen_pos = view3d_utils.location_3d_to_region_2d(region, rv3d, world_v_co)
+                              
+                              if screen_pos:
+                                   # Calculate 2D distance
+                                   m_coord = mathutils.Vector(coord)
+                                   s_coord = mathutils.Vector(screen_pos)
+                                   dist_px = (s_coord - m_coord).length
+                                   
+                                   # Threshold: 20 pixels (typical snapping feel)
+                                   if dist_px < 20.0:
+                                        final_loc = world_v_co
             
             if final_loc is None:
                  final_loc = loc
