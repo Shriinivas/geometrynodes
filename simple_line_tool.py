@@ -354,6 +354,45 @@ class MOUSE_OT_draw_mesh_line(Operator):
             bpy.data.objects.remove(self.obj, do_unlink=True)
         context.area.tag_redraw()
 
+    def get_rotation_target(self):
+        """Helper to find the modifier and the specific rotation input identifier."""
+        if not self.obj:
+            return None, None, None
+
+        mod = None
+        for m in self.obj.modifiers:
+            if m.type == "NODES" and "Wrap" in m.name:
+                mod = m
+                break
+        
+        if mod and mod.node_group:
+             for item in mod.node_group.interface.items_tree:
+                 if item.item_type == "SOCKET" and item.in_out == "INPUT":
+                     if "rotation" in item.name.lower():
+                         if item.socket_type in {'NodeSocketInt', 'NodeSocketFloat', 'NodeSocketIntUnsigned', 'NodeSocketFloatAngle'}:
+                             return mod, item.identifier, item.name
+        return None, None, None
+
+    def update_viewport(self, context, mod):
+        """Force immediate visual update."""
+        mod.show_viewport = False
+        mod.show_viewport = True
+        context.view_layer.update()
+        context.area.tag_redraw()
+
+    def adjust_rotation(self, context, step):
+        mod, target_identifier, name = self.get_rotation_target()
+        if mod and target_identifier:
+            try:
+                current_val = mod.get(target_identifier)
+                if isinstance(current_val, (int, float)):
+                    new_val = int(round(current_val + step))
+                    mod[target_identifier] = new_val
+                    self.report({"INFO"}, f"Rotation: {new_val}°")
+                    self.update_viewport(context, mod)
+            except Exception as e:
+                print(f"Failed to adjust rotation: {e}")
+
     def align_to_geometry(self, context):
         if not self.last_hit or not self.obj:
             return
@@ -361,50 +400,34 @@ class MOUSE_OT_draw_mesh_line(Operator):
         hit, loc, normal, index, obj, matrix = self.last_hit
 
         # 1. Get Line Vector (Tangent)
-        # Vertices are at self.obj.data.vertices[0] and [1]
         v0 = self.obj.matrix_world @ self.obj.data.vertices[0].co
         v1 = self.obj.matrix_world @ self.obj.data.vertices[1].co
         
         diff = v1 - v0
         if diff.length < 0.0001:
-            return # Vectors too close
+            return
             
         tangent = diff.normalized()
         
-        # 2. Compute Reference Normal (Standard "Up" behavior)
-        # We assume the curve's default normal points as close to +Z as possible
+        # 2. Compute Reference Normal (Z-up projected)
         z_axis = mathutils.Vector((0, 0, 1))
         
-        # Check if line is vertical
         if abs(tangent.dot(z_axis)) > 0.9999: 
-            # Fallback for vertical lines (usually X or Y, let's assume X for now)
             ref_normal = mathutils.Vector((1, 0, 0)) 
         else:
-            # Project Z onto the plane perpendicular to Tangent
-            # Ref = Z - (Z . Tangent) * Tangent
             ref_normal = (z_axis - (z_axis.dot(tangent) * tangent)).normalized()
             
-        # 3. Project Target Vector
-        # User requested using "tangent rather than normal"
-        # We assume they mean the vector ON the face surface perpendicular to the line.
-        # This is cross product of Face Normal and Line Tangent.
-        
-        target_normal = normal # Face Normal
+        # 3. Project Target Vector (Surface Tangent)
+        target_normal = normal
         face_tangent = target_normal.cross(tangent)
-        
-        # This vector is perpendicular to tangent by definition, so projection is trivial (it is itself)
         target_proj = face_tangent 
         
         rot_val = 0
-        
         if target_proj.length > 0.001:
             target_proj.normalize()
             
-            # 4. Calculate Signed Angle between Ref and Target
-            # robust manual calculation instead of angle_signed to avoid API version issues
-            angle_rad = ref_normal.angle(target_proj) # Always positive [0, pi]
-            
-            # Determine sign using cross product relative to tangent axis
+            # 4. Calculate Signed Angle
+            angle_rad = ref_normal.angle(target_proj)
             cross = ref_normal.cross(target_proj)
             if cross.dot(tangent) < 0:
                 angle_rad = -angle_rad
@@ -413,64 +436,37 @@ class MOUSE_OT_draw_mesh_line(Operator):
             rot_val = int(round(rotation_degrees))
         
         # 5. Apply to Modifier
-        mod = None
-        for m in self.obj.modifiers:
-            if m.type == "NODES" and "Wrap" in m.name:
-                mod = m
-                break
-        
-        if mod and mod.node_group:
-            target_identifier = None
+        mod, target_identifier, name = self.get_rotation_target()
             
-            # Search for SCALAR input named "Rotation"
-            for item in mod.node_group.interface.items_tree:
-                if item.item_type == "SOCKET" and item.in_out == "INPUT":
-                    if "rotation" in item.name.lower():
-                        # Look for Int/Float types
-                        if item.socket_type in {'NodeSocketInt', 'NodeSocketFloat', 'NodeSocketIntUnsigned', 'NodeSocketFloatAngle'}:
-                            target_identifier = item.identifier
-                            break
-            
-            if target_identifier:
-                try:
-                    # Toggle Logic:
-                    # If current value is already set to the calculated 'rot_val', 
-                    # flip it by 180 degrees to allow user to choose direction.
-                    # If it's already flipped (rot_val + 180), cycle back to rot_val.
-                    
-                    current_val = mod.get(target_identifier)
-                    final_val = rot_val
-                    
-                    # Ensure we compare similar types (int)
-                    if isinstance(current_val, (int, float)):
-                        current_int = int(round(current_val))
-                        # Check strict equality or flipped state
-                        if current_int == rot_val:
-                            final_val = rot_val + 180
-                        elif current_int == rot_val + 180:
-                            final_val = rot_val
-                        elif current_int == rot_val - 180: # Handle -180 case just in case
-                            final_val = rot_val
+        if target_identifier:
+            try:
+                current_val = mod.get(target_identifier)
+                final_val = rot_val
+                
+                # Toggle Logic
+                if isinstance(current_val, (int, float)):
+                    current_int = int(round(current_val))
+                    if current_int == rot_val:
+                        final_val = rot_val + 180
+                    elif current_int == rot_val - 180: # Just in case
+                        final_val = rot_val
+                    elif current_int == rot_val + 180:
+                        final_val = rot_val
 
-                    mod[target_identifier] = final_val
-                    self.report({"INFO"}, f"Aligned to {item.name}: {final_val}°")
-                    
-                    # Force immediate visual update
-                    mod.show_viewport = False
-                    mod.show_viewport = True
-                    context.view_layer.update()
-                    context.area.tag_redraw()
-                    
-                except Exception as e:
-                    print(f"Failed to set modifier prop: {e}")
-                    self.report({"WARNING"}, f"Could not set {item.name}")
-            else:
-                self.report({"WARNING"}, "No Integer/Float 'Rotation' input found")
+                mod[target_identifier] = final_val
+                self.report({"INFO"}, f"Aligned to {name}: {final_val}°")
+                self.update_viewport(context, mod)
+                
+            except Exception as e:
+                print(f"Failed to set modifier prop: {e}")
+                self.report({"WARNING"}, f"Could not set {name}")
+        else:
+            self.report({"WARNING"}, "No Integer/Float 'Rotation' input found")
 
     def modal(self, context, event):
         context.area.tag_redraw()
 
-        # Tool Watch: Check if user switched to another tool
+        # Tool Watch
         try:
             active_tool = context.workspace.tools.from_space_view3d_mode(context.mode)
             if active_tool and active_tool.idname != "my_tool.mesh_line":
@@ -497,6 +493,15 @@ class MOUSE_OT_draw_mesh_line(Operator):
                     ):
                         self.mouse_loc_3d = None
                         return {"PASS_THROUGH"}
+
+        # Manual Rotation Adjustment (Ctrl + Scroll / +/-)
+        if event.ctrl and self.drawing:
+             if event.type in {'WHEELUPMOUSE', 'NUMPAD_PLUS'} and event.value == 'PRESS':
+                  self.adjust_rotation(context, 5)
+                  return {"RUNNING_MODAL"}
+             elif event.type in {'WHEELDOWNMOUSE', 'NUMPAD_MINUS'} and event.value == 'PRESS':
+                  self.adjust_rotation(context, -5)
+                  return {"RUNNING_MODAL"}
 
         if event.type in {
             "MIDDLEMOUSE",
