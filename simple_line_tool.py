@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Draw Mesh Line",
     "author": "Antigravity",
-    "version": (1, 1),
+    "version": (1, 2),
     "blender": (3, 0, 0),
     "location": "View3D > Toolbar",
     "description": "Draw a mesh line by clicking start and end points",
@@ -18,7 +18,6 @@ from pathlib import Path
 
 
 def create_wrapper_modifier(obj, target_group):
-    # Same as before
     target_group_name = target_group.name
 
     if not obj or obj.type not in {"MESH", "CURVE", "POINTCLOUD", "VOLUME"}:
@@ -99,7 +98,6 @@ def create_wrapper_modifier(obj, target_group):
 
 
 def get_asset_nodegroup(group_name):
-    # Same as before
     if group_name in bpy.data.node_groups:
         return bpy.data.node_groups[group_name]
 
@@ -177,36 +175,21 @@ def apply_snapping(context, loc, region, rv3d):
     snap_elements = context.tool_settings.snap_elements
     
     if 'INCREMENT' in snap_elements:
-        # Determine Adaptive Grid Scale
         grid_scale = 1.0
         
         if region and rv3d:
-             # Calculate simple view scale metric: 
-             # Distance between (0,0,0) and (1,0,0) + loc in Screen Space
-             # Project Location
              p1 = view3d_utils.location_3d_to_region_2d(region, rv3d, loc)
              if p1:
-                 # Project Loc + 1 unit X
                  p2 = view3d_utils.location_3d_to_region_2d(region, rv3d, loc + mathutils.Vector((1.0, 0, 0)))
                  if p2:
                      pixels_per_unit = (mathutils.Vector(p1) - mathutils.Vector(p2)).length
                      
                      if pixels_per_unit > 0.00001:
-                         # Target spacing: ~30 pixels per grid line
                          target_px = 30.0
-                         
-                         # raw_step is the unit size needed to get target_px spacing
-                         # step * pixels_per_unit = target_px
                          raw_step = target_px / pixels_per_unit
-                         
-                         # Snap raw_step to nearest power of 10
                          exponent = math.floor(math.log10(raw_step))
                          grid_scale = 10 ** exponent
-                         
-                         # Optional: Allow 0.5 steps? Blender does 1, 0.1 etc. 
-                         # We'll stick to powers of 10 for simplicity and robustness
         
-        # Apply Unit Scale
         if context.scene.unit_settings.system != 'NONE':
              grid_scale *= context.scene.unit_settings.scale_length
              
@@ -230,6 +213,7 @@ class MOUSE_OT_draw_mesh_line(Operator):
         self.drawing = False
         self._handle = None
         self.mouse_loc_3d = None
+        self.last_hit = None # Store (hit, loc, normal, index, obj, matrix)
         
         if context.area.type == "VIEW_3D":
             self.get_location(context, event)
@@ -244,11 +228,9 @@ class MOUSE_OT_draw_mesh_line(Operator):
             return {"CANCELLED"}
     
     def get_location(self, context, event):
-        # 1. Identify Valid Window Region (Robust against UI hover)
         region = context.region
         rv3d = context.region_data
         
-        # Check if current region is usable, if not find WINDOW region
         if region.type != 'WINDOW':
             found_r = None
             for r in context.area.regions:
@@ -257,16 +239,10 @@ class MOUSE_OT_draw_mesh_line(Operator):
                     break
             if found_r:
                 region = found_r
-                rv3d = region.data # In View3D, region.data is RegionView3D
+                rv3d = region.data
             else:
-                return None # Should not happen in View3D
+                return None
 
-        # 2. Adjust Coordinates if event is not in this region
-        # event.mouse_region_x/y are relative to the region that received the event.
-        # If we are over the Sidebar ('UI'), these coords are local to Sidebar.
-        # We need coords local to 'WINDOW' region for view3d_utils.
-        
-        # Safer approach: Use Global Coords (event.mouse_x) - Region Origin
         coord = (event.mouse_x - region.x, event.mouse_y - region.y)
         
         self.mouse_loc_3d = None 
@@ -284,6 +260,9 @@ class MOUSE_OT_draw_mesh_line(Operator):
         final_loc = None
         
         if hit:
+            # Store hit info for feature use (e.g. alignment)
+            self.last_hit = (hit, loc, normal, index, obj, matrix)
+            
             # Vertex Snapping (Proximity Check)
             if context.tool_settings.use_snap and 'VERTEX' in context.tool_settings.snap_elements:
                  if obj.type == 'MESH':
@@ -307,20 +286,20 @@ class MOUSE_OT_draw_mesh_line(Operator):
                               screen_pos = view3d_utils.location_3d_to_region_2d(region, rv3d, world_v_co)
                               if screen_pos:
                                    dist_px = (mathutils.Vector(screen_pos) - mathutils.Vector(coord)).length
-                                   # Threshold: 20 pixels
                                    if dist_px < 20.0:
                                         final_loc = world_v_co
             
             if final_loc is None:
                  final_loc = loc
         else:
+            # Reset last_hit if we aim at void
+            self.last_hit = None
             cursor_loc = scene.cursor.location
             final_loc = view3d_utils.region_2d_to_location_3d(region, rv3d, coord, cursor_loc)
         
         did_vert_snap = (final_loc != loc) if hit else False
         
         if not did_vert_snap:
-             # Pass region/rv3d for adaptive scaling
              final_loc = apply_snapping(context, final_loc, region, rv3d)
              
         self.mouse_loc_3d = final_loc
@@ -351,6 +330,39 @@ class MOUSE_OT_draw_mesh_line(Operator):
              bpy.data.objects.remove(self.obj, do_unlink=True)
         context.area.tag_redraw()
 
+    def align_to_geometry(self, context):
+        if not self.last_hit or not self.obj:
+            return
+
+        hit, loc, normal, index, obj, matrix = self.last_hit
+        
+        # Calculate World Normal (Ray cast normal is usually world space face normal)
+        world_normal = normal
+        
+        # Calculate Rotation (Align Z to Normal)
+        # Assuming the "Measurement" defaults to Z alignment
+        rot_quat = mathutils.Vector((0, 0, 1)).rotation_difference(world_normal)
+        rot_euler = rot_quat.to_euler()
+        
+        # Apply to Modifier
+        mod = None
+        for m in self.obj.modifiers:
+            if m.type == 'NODES' and "Wrap" in m.name:
+                mod = m
+                break
+        
+        if mod:
+             # Look for Rotation input (Case insensitive search for "Rot")
+             found = False
+             for key in mod.keys():
+                 if "rot" in key.lower() and hasattr(mod[key], "__len__") and len(mod[key]) == 3:
+                      mod[key] = rot_euler
+                      found = True
+                      self.report({'INFO'}, f"Aligned to Normal ({key})")
+                      break
+             if not found:
+                  self.report({'WARNING'}, "No Vector Rotation input found on modifier")
+
     def modal(self, context, event):
         context.area.tag_redraw()
         
@@ -362,20 +374,15 @@ class MOUSE_OT_draw_mesh_line(Operator):
                 return {'CANCELLED'}
         except Exception:
             pass
-
-        # Area check: If outside 3D View entirely, allow pass through
+        
+        # Area check
         area = context.area
         if not (area.x <= event.mouse_x <= area.x + area.width and
                 area.y <= event.mouse_y <= area.y + area.height):
             self.mouse_loc_3d = None
             return {'PASS_THROUGH'}
         
-        # Region Check:
-        # If we are DRAWING, we want to capture mouse even if over UI (N-Panel).
-        # If NOT drawing, let UI handle hovers.
-        
         if not self.drawing:
-             # Check if mouse acts on UI region
              for region in context.area.regions:
                  if region.type != 'WINDOW':
                      if (region.x <= event.mouse_x <= region.x + region.width and 
@@ -383,7 +390,6 @@ class MOUSE_OT_draw_mesh_line(Operator):
                          self.mouse_loc_3d = None
                          return {'PASS_THROUGH'}
 
-        # Navigation Passthrough
         if event.type in {'MIDDLEMOUSE', 'WHEELUPMOUSE', 'WHEELDOWNMOUSE', 'NUMPAD_PLUS', 'NUMPAD_MINUS'}:
             return {'PASS_THROUGH'}
 
@@ -397,21 +403,12 @@ class MOUSE_OT_draw_mesh_line(Operator):
             return {"RUNNING_MODAL"}
 
         elif event.type == "LEFTMOUSE" and event.value == "PRESS":
-            # Prevent click if over UI (unless drawing? drawing click confirms)
-            # If over UI while drawing, we still Confirm?
-            # Or should we prevent confirmation if over UI?
-            # User said "gets finalized automatically". 
-            # If we prevent confirmation, user can't finish if endpoint is under panel.
-            # Best practice: Allow finish if drawing.
-            
             if not self.drawing:
-                 # Check UI overlap again just in case MOUSEMOVE didn't catch it
                  for region in context.area.regions:
                      if region.type != 'WINDOW':
                          if (region.x <= event.mouse_x <= region.x + region.width and 
                              region.y <= event.mouse_y <= region.y + region.height):
                              return {'PASS_THROUGH'}
-                             
                  loc = self.get_location(context, event)
                  if loc:
                       self.start_point = loc
@@ -423,6 +420,11 @@ class MOUSE_OT_draw_mesh_line(Operator):
                  return {"RUNNING_MODAL"}
             else:
                  return {"FINISHED"}
+                 
+        elif event.type == 'E' and event.value == 'PRESS':
+             if self.drawing:
+                  self.align_to_geometry(context)
+                  return {"RUNNING_MODAL"}
 
         elif event.type in {"RIGHTMOUSE", "ESC"}:
             self.cancel_op(context)
