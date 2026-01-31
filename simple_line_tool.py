@@ -433,8 +433,27 @@ class MOUSE_OT_draw_mesh_line(Operator):
             
             if target_identifier:
                 try:
-                    mod[target_identifier] = rot_val
-                    self.report({"INFO"}, f"Aligned to {item.name}: {rot_val}°")
+                    # Toggle Logic:
+                    # If current value is already set to the calculated 'rot_val', 
+                    # flip it by 180 degrees to allow user to choose direction.
+                    # If it's already flipped (rot_val + 180), cycle back to rot_val.
+                    
+                    current_val = mod.get(target_identifier)
+                    final_val = rot_val
+                    
+                    # Ensure we compare similar types (int)
+                    if isinstance(current_val, (int, float)):
+                        current_int = int(round(current_val))
+                        # Check strict equality or flipped state
+                        if current_int == rot_val:
+                            final_val = rot_val + 180
+                        elif current_int == rot_val + 180:
+                            final_val = rot_val
+                        elif current_int == rot_val - 180: # Handle -180 case just in case
+                            final_val = rot_val
+
+                    mod[target_identifier] = final_val
+                    self.report({"INFO"}, f"Aligned to {item.name}: {final_val}°")
                     
                     # Force immediate visual update
                     mod.show_viewport = False
