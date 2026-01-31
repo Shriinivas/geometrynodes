@@ -336,11 +336,10 @@ class MOUSE_OT_draw_mesh_line(Operator):
 
         hit, loc, normal, index, obj, matrix = self.last_hit
         
-        # Calculate World Normal (Ray cast normal is usually world space face normal)
+        # Calculate World Normal
         world_normal = normal
         
         # Calculate Rotation (Align Z to Normal)
-        # Assuming the "Measurement" defaults to Z alignment
         rot_quat = mathutils.Vector((0, 0, 1)).rotation_difference(world_normal)
         rot_euler = rot_quat.to_euler()
         
@@ -351,17 +350,31 @@ class MOUSE_OT_draw_mesh_line(Operator):
                 mod = m
                 break
         
-        if mod:
-             # Look for Rotation input (Case insensitive search for "Rot")
-             found = False
-             for key in mod.keys():
-                 if "rot" in key.lower() and hasattr(mod[key], "__len__") and len(mod[key]) == 3:
-                      mod[key] = rot_euler
-                      found = True
-                      self.report({'INFO'}, f"Aligned to Normal ({key})")
-                      break
-             if not found:
-                  self.report({'WARNING'}, "No Vector Rotation input found on modifier")
+        if mod and mod.node_group:
+             # Robust Lookup: Find socket identifier by Name in the Node Group Interface
+             target_identifier = None
+             
+             # Search for input named "Rotation" (case-insensitive)
+             for item in mod.node_group.interface.items_tree:
+                 if item.item_type == 'SOCKET' and item.in_out == 'INPUT':
+                     if "rotation" in item.name.lower():
+                         # Verify it's a vector/rotation type if possible, or just trust the name
+                         if item.socket_type in {'NodeSocketVector', 'NodeSocketRotation', 'NodeSocketVectorEuler'}:
+                             target_identifier = item.identifier
+                             break
+            
+             if target_identifier:
+                 # Check if the identifier exists as a property on the modifier
+                 # It should, but purely script-created groups sometimes have delay?
+                 # Usually identifiers are stable.
+                 try:
+                     mod[target_identifier] = rot_euler
+                     self.report({'INFO'}, f"Aligned to {item.name}")
+                 except Exception as e:
+                     print(f"Failed to set modifier prop: {e}")
+                     self.report({'WARNING'}, f"Could not set {item.name}")
+             else:
+                  self.report({'WARNING'}, "No 'Rotation' input found on modifier")
 
     def modal(self, context, event):
         context.area.tag_redraw()
