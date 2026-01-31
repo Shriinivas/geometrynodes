@@ -430,6 +430,13 @@ class MOUSE_OT_draw_mesh_line(Operator):
                 try:
                     mod[target_identifier] = rot_val
                     self.report({"INFO"}, f"Aligned to {item.name}: {rot_val}°")
+                    
+                    # Force immediate visual update
+                    mod.show_viewport = False
+                    mod.show_viewport = True
+                    context.view_layer.update()
+                    context.area.tag_redraw()
+                    
                 except Exception as e:
                     print(f"Failed to set modifier prop: {e}")
                     self.report({"WARNING"}, f"Could not set {item.name}")
