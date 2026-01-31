@@ -384,11 +384,16 @@ class MOUSE_OT_draw_mesh_line(Operator):
             # Ref = Z - (Z . Tangent) * Tangent
             ref_normal = (z_axis - (z_axis.dot(tangent) * tangent)).normalized()
             
-        # 3. Project Target Face Normal onto Plane Perpendicular to Tangent
-        target_normal = normal # Raycast normal is World Space
+        # 3. Project Target Vector
+        # User requested using "tangent rather than normal"
+        # We assume they mean the vector ON the face surface perpendicular to the line.
+        # This is cross product of Face Normal and Line Tangent.
         
-        # Project: Target - (Target . Tangent) * Tangent
-        target_proj = target_normal - (target_normal.dot(tangent) * tangent)
+        target_normal = normal # Face Normal
+        face_tangent = target_normal.cross(tangent)
+        
+        # This vector is perpendicular to tangent by definition, so projection is trivial (it is itself)
+        target_proj = face_tangent 
         
         rot_val = 0
         
