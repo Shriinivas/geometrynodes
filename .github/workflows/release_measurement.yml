@@ -1,0 +1,57 @@
+name: Create Measurement Tool Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release Version (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create Addon Zip
+        run: |
+          # Create the zip file containing the measurement folder
+          zip -r measurement.zip measurement/ \
+            -x "measurement/__pycache__/*" \
+            -x "measurement/*/__pycache__/*" \
+            -x "measurement/*/*/__pycache__/*" \
+            -x "measurement/*/*/*/__pycache__/*" \
+            -x "measurement/*.blend1" \
+            -x "measurement/.docs/*" \
+            -x "measurement/.git/*" \
+            -x "measurement/*.pyc" \
+            -x "measurement/*/*.pyc" \
+            -x "measurement/*/*/*.pyc"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: Measurement Tools ${{ inputs.version }}
+          body: |
+            # Measurement Tools for Blender
+
+            **Version:** ${{ inputs.version }}
+            
+            ## Installation
+            1. Download `measurement.zip` from the assets below.
+            2. Open Blender and navigate to **Edit > Preferences > Add-ons**.
+            3. Click **Install...**, select the zip file, and enable **Measure Tools**.
+
+            ## Features
+            - Distance and Angle measurement in Object Mode.
+            - Procedural Geometry Nodes backend.
+            - Customizable appearance via Modifiers.
+            - Mesh and Grease Pencil output support.
+          files: measurement.zip
+          draft: true
+          prerelease: false
