@@ -4,7 +4,7 @@ This package provides utility tools for measuring distances and angles in the Bl
 
 ## Installation
 
-1.  Download `measurement.zip` from the **[Latest Release](../../releases/latest)** assets.
+1.  Download `measurement.zip` from the **[Latest Release](../releases/latest)** assets.
 2.  Open Blender and go to **Edit > Preferences > Add-ons**.
 3.  Click **Install...** and select the zip file (or pointing to the folder if manual).
 4.  Enable the **Measure Tools** addon.
