@@ -218,6 +218,9 @@ class BaseDrawTool(Operator):
                 elif curr_int == target_int + 180:
                     final_val = target_int
 
+            if isinstance(final_val, float):
+                final_val = round(final_val, 2)
+
             # Type preservation
             if isinstance(curr_val, int) and isinstance(final_val, float):
                 final_val = int(round(final_val))
