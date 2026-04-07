@@ -14,7 +14,7 @@ Contains parametric and polar plots that of epicycloid and Archimedes spiral; pr
 
 Creating pie charts using Blender geo nodes; project file of [this video tutorial](https://youtu.be/19ptQCVCak0). Also includes extended pie chart with up to 10 segments and various other parameters demonstrated in [this video](https://youtu.be/Ry8ySp-Fsmw)
 
-## measurement.blend (Updated for Blender ver 5.0)
+## measurement.blend (Updated for Blender ver 5.1)
 
 **Now available as a full Blender Addon!**
 See [measurement/README.md](measurement/README.md) for installation and usage instructions.
@@ -23,6 +23,10 @@ See [measurement/README.md](measurement/README.md) for installation and usage in
 *   **Procedural**: Powered by Geometry Nodes.
 *   **Customizable**: Mesh/Grease Pencil output, configurable styles, and snapping.
 
-## spring.demo
+## spring.blend
 
 Spring action simulation; project file of [this video](https://youtu.be/_c5fS_DTFAs)
+
+## clock.blend
+
+Procedural grandfather clock with a number of configurable parameters demonstrated in [this video](https://youtu.be/SslVMG14Z9k)
