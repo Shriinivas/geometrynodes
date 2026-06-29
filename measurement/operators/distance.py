@@ -8,6 +8,7 @@ import mathutils
 from .base import BaseDrawTool, get_prefs
 from ..constants import FLOAT_TYPES, INT_TYPES
 from ..core.nodegroup import create_wrapper_modifier, get_asset_nodegroup
+from ..core.drawing import unregister_draw_handler
 
 
 class MOUSE_OT_draw_distance(BaseDrawTool):
@@ -152,9 +153,7 @@ class MOUSE_OT_draw_distance(BaseDrawTool):
                     self.waiting_for_move = False
                     self.drawing = True
                     if self._handle:
-                        bpy.types.SpaceView3D.draw_handler_remove(
-                            self._handle, "WINDOW"
-                        )
+                        unregister_draw_handler(self._handle)
                         self._handle = None
 
             if self.drawing and self.obj and loc:

@@ -8,11 +8,63 @@ from gpu_extras.batch import batch_for_shader
 from ..constants import get_bindings_for_tool
 
 
+# Global list of registered draw handlers to prevent leaks during undo/redo/cancellation
+_registered_handlers = []
+
+
+def register_draw_handler(operator, callback, draw_type, region_type="WINDOW"):
+    """Register a draw handler and track it globally."""
+    args = (operator, bpy.context)
+    handle = bpy.types.SpaceView3D.draw_handler_add(callback, args, region_type, draw_type)
+    _registered_handlers.append({
+        "operator": operator,
+        "handle": handle,
+        "type": region_type
+    })
+    return handle
+
+
+def unregister_draw_handler(handle, region_type="WINDOW"):
+    """Unregister a specific draw handler and remove it from tracking."""
+    for item in _registered_handlers:
+        if item["handle"] is handle:
+            try:
+                bpy.types.SpaceView3D.draw_handler_remove(handle, region_type)
+            except Exception:
+                pass
+            _registered_handlers.remove(item)
+            break
+
+
+def unregister_operator_handlers(operator):
+    """Unregister all draw handlers associated with a specific operator."""
+    to_remove = []
+    for item in _registered_handlers:
+        if item["operator"] is operator:
+            try:
+                bpy.types.SpaceView3D.draw_handler_remove(item["handle"], item["type"])
+            except Exception:
+                pass
+            to_remove.append(item)
+    for item in to_remove:
+        try:
+            _registered_handlers.remove(item)
+        except ValueError:
+            pass
+
+
+def cleanup_dead_handlers(operator):
+    """Cleanup handlers for a dead operator reference."""
+    unregister_operator_handlers(operator)
+
+
 def draw_callback_px(self, context):
     """Draw cursor point indicator."""
     try:
-        self.as_pointer()
+        # Accessing bl_idname is guaranteed to raise ReferenceError if C++ operator is removed
+        _ = self.bl_idname
     except ReferenceError:
+        cleanup_dead_handlers(self)
         return
     if not self.mouse_loc_3d:
         return
@@ -33,10 +85,16 @@ def draw_callback_px(self, context):
 def draw_help_overlay(self, context):
     """Draw help text overlay showing keybindings for active tool."""
     try:
-        self.as_pointer()
+        # Accessing bl_idname is guaranteed to raise ReferenceError if C++ operator is removed
+        _ = self.bl_idname
     except ReferenceError:
+        cleanup_dead_handlers(self)
         return
-    if not hasattr(self, 'tool_type') or not self.tool_type:
+    try:
+        if not hasattr(self, 'tool_type') or not self.tool_type:
+            return
+    except ReferenceError:
+        cleanup_dead_handlers(self)
         return
     
     # Get position settings from addon preferences

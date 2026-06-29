@@ -6,7 +6,7 @@ from bpy.types import Operator
 from bpy_extras import view3d_utils
 
 from ..constants import FLOAT_TYPES, INT_TYPES
-from ..core.drawing import draw_callback_px, draw_help_overlay
+from ..core.drawing import draw_callback_px, draw_help_overlay, register_draw_handler, unregister_operator_handlers
 from ..core.snapping import apply_snapping
 
 
@@ -35,14 +35,8 @@ class BaseDrawTool(Operator):
 
         if context.area.type == "VIEW_3D":
             self.get_location(context, event)
-            args = (self, context)
-            self._handle = bpy.types.SpaceView3D.draw_handler_add(
-                draw_callback_px, args, "WINDOW", "POST_VIEW"
-            )
-            # Add help overlay handler
-            self._help_handle = bpy.types.SpaceView3D.draw_handler_add(
-                draw_help_overlay, args, "WINDOW", "POST_PIXEL"
-            )
+            self._handle = register_draw_handler(self, draw_callback_px, "POST_VIEW")
+            self._help_handle = register_draw_handler(self, draw_help_overlay, "POST_PIXEL")
             context.window_manager.modal_handler_add(self)
             context.area.tag_redraw()
             return {"RUNNING_MODAL"}
@@ -138,18 +132,9 @@ class BaseDrawTool(Operator):
 
     def remove_draw_handlers(self, context):
         """Cleanly remove the view draw handlers."""
-        if self._handle:
-            try:
-                bpy.types.SpaceView3D.draw_handler_remove(self._handle, "WINDOW")
-            except Exception:
-                pass
-            self._handle = None
-        if self._help_handle:
-            try:
-                bpy.types.SpaceView3D.draw_handler_remove(self._help_handle, "WINDOW")
-            except Exception:
-                pass
-            self._help_handle = None
+        unregister_operator_handlers(self)
+        self._handle = None
+        self._help_handle = None
         if context and context.area:
             context.area.tag_redraw()
 

@@ -7,6 +7,7 @@ import mathutils
 from .base import BaseDrawTool, get_prefs
 from ..constants import FLOAT_TYPES, INT_TYPES
 from ..core.nodegroup import create_wrapper_modifier, get_asset_nodegroup
+from ..core.drawing import unregister_draw_handler
 
 
 class MOUSE_OT_draw_angle(BaseDrawTool):
@@ -156,9 +157,7 @@ class MOUSE_OT_draw_angle(BaseDrawTool):
                     self.drawing = True
                     self.phase = 1
                     if self._handle:
-                        bpy.types.SpaceView3D.draw_handler_remove(
-                            self._handle, "WINDOW"
-                        )
+                        unregister_draw_handler(self._handle)
                         self._handle = None
                 return {"RUNNING_MODAL"}
 
