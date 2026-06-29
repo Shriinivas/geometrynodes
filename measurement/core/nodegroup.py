@@ -5,83 +5,17 @@ from pathlib import Path
 
 
 def create_wrapper_modifier(obj, target_group):
-    """Create a wrapper modifier for a geometry node group."""
+    """Create a modifier for a geometry node group."""
     target_group_name = target_group.name
 
     if not obj or obj.type not in {"MESH", "CURVE", "POINTCLOUD", "VOLUME"}:
         print("Error: Select a valid geometry object.")
-        return
+        return None
 
+    # Use Wrap_ prefix to identify measurement modifiers
     mod = obj.modifiers.new(name=f"Wrap_{target_group_name}", type="NODES")
-    wrapper_group = bpy.data.node_groups.new(
-        name=f"{target_group_name}", type="GeometryNodeTree"
-    )
+    mod.node_group = target_group
 
-    nodes = wrapper_group.nodes
-    nodes.clear()
-
-    defVals = {}
-    for item in target_group.interface.items_tree:
-        if item.item_type == "SOCKET" and item.in_out == "INPUT":
-            new_socket = wrapper_group.interface.new_socket(
-                name=item.name, in_out="INPUT", socket_type=item.socket_type
-            )
-            if item.socket_type == "NodeSocketMenu":
-                source_items = getattr(item, "items", None)
-                if source_items and not callable(source_items):
-                    for menu_item in source_items:
-                        new_socket.items.new(name=menu_item.name)
-            if hasattr(item, "default_value"):
-                try:
-                    defVals[new_socket.identifier] = item.default_value
-                    new_socket.default_value = item.default_value
-                except Exception:
-                    pass
-            if hasattr(item, "min_value"):
-                new_socket.min_value = item.min_value
-            if hasattr(item, "max_value"):
-                new_socket.max_value = item.max_value
-
-    mod.node_group = wrapper_group
-
-    group_in = nodes.new("NodeGroupInput")
-    group_out = nodes.new("NodeGroupOutput")
-    target_node = nodes.new("GeometryNodeGroup")
-    target_node.node_tree = target_group
-
-    group_in.location = (-400, 0)
-    target_node.location = (0, 0)
-    group_out.location = (400, 0)
-
-    for item in target_group.interface.items_tree:
-        if item.item_type == "SOCKET":
-            if item.in_out == "INPUT":
-                wrapper_group.links.new(
-                    group_in.outputs[item.identifier],
-                    target_node.inputs[item.identifier],
-                )
-            elif item.in_out == "OUTPUT":
-                if item.identifier not in wrapper_group.interface.items_tree:
-                    wrapper_group.interface.new_socket(
-                        name=item.name, in_out="OUTPUT", socket_type=item.socket_type
-                    )
-                wrapper_group.links.new(
-                    target_node.outputs[item.identifier],
-                    group_out.inputs[item.identifier],
-                )
-
-    for item in wrapper_group.interface.items_tree:
-        if item.socket_type == "NodeSocketMenu":
-            socket_id = item.identifier
-            defVal = defVals[socket_id]
-            if socket_id in mod.keys():
-                del mod[socket_id]
-            try:
-                item.default_value = defVal
-            except Exception:
-                pass
-
-    mod.show_viewport = mod.show_viewport
     return mod
 
 

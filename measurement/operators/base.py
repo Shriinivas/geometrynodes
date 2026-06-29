@@ -30,6 +30,8 @@ class BaseDrawTool(Operator):
         self._help_handle = None
         self.mouse_loc_3d = None
         self.last_hit = None
+        
+        self.init_session_params(context)
 
         if context.area.type == "VIEW_3D":
             self.get_location(context, event)
@@ -198,16 +200,187 @@ class BaseDrawTool(Operator):
                     return mod, item.identifier, item.name
         return None, None, None
 
+    def init_session_params(self, context):
+        prefs = get_prefs(context)
+        if not prefs:
+            return
+        
+        socket_to_pref = {
+            "Output Type": "default_output_type",
+            "Precision": "default_precision",
+            "Offset": "default_offset",
+            "Substitute Text": "default_substitute_text",
+            "Text Size": "default_text_size",
+            "Text Gap": "default_text_gap",
+            "Text Rotation": "default_text_rotation",
+            "Scale": "default_scale",
+            "Radius": "default_radius",
+            "Rotation": "default_rotation",
+            "Line Thickness": "default_line_thickness",
+            "Ref Line Thickness": "default_ref_line_thickness",
+            "Conn Line Thickness": "default_conn_line_thickness",
+            "Arrowhead Width": "default_arrowhead_width",
+            "Arrowhead Length": "default_arrowhead_length",
+            "Point Radius": "default_point_radius",
+            "Flip Text": "default_flip_text",
+            "Text Thickness": "default_text_thickness",
+            "Outer Angle": "default_outer_angle",
+            # Colors
+            "Arrow Color": "default_arrow_color",
+            "GP Arc Color": "default_arrow_color",
+            "Ref Line Color": "default_ref_line_color",
+            "GP Ref Line Color": "default_ref_line_color",
+            "Conn Line Color": "default_conn_line_color",
+            "GP Main Line Color": "default_conn_line_color",
+        }
+        
+        self.session_params = {}
+        for socket_name, pref_attr in socket_to_pref.items():
+            if hasattr(prefs, pref_attr):
+                val = getattr(prefs, pref_attr)
+                if hasattr(val, "to_list"):
+                    val = val.to_list()
+                elif hasattr(val, "__len__") and not isinstance(val, str):
+                    val = list(val)
+                self.session_params[socket_name] = val
+        
+        # Unit special cases
+        self.session_params["Unit_Distance"] = prefs.default_unit_distance
+        self.session_params["Unit_Angle"] = prefs.default_unit_angle
+
+    def get_actual_length(self):
+        if not self.obj or not self.obj.data.vertices:
+            return 1.0
+        verts = self.obj.data.vertices
+        if len(verts) < 2:
+            return 1.0
+        
+        v0 = self.obj.matrix_world @ verts[0].co
+        v1 = self.obj.matrix_world @ verts[1].co
+        
+        if self.tool_type == "angle" and len(verts) >= 3:
+            v2 = self.obj.matrix_world @ verts[2].co
+            d1 = (v0 - v1).length
+            d2 = (v2 - v1).length
+            return (d1 + d2) / 2.0
+        else:
+            return (v1 - v0).length
+
+    def apply_session_params_to_modifier(self, context):
+        if not self.obj:
+            return
+        
+        mod = next(
+            (m for m in self.obj.modifiers if m.type == "NODES" and "Wrap" in m.name),
+            None,
+        )
+        if not mod or not mod.node_group:
+            return
+
+        prefs = get_prefs(context)
+        is_relative = prefs.measurement_mode == 'RELATIVE' if prefs else False
+
+        actual_length = max(0.001, self.get_actual_length())
+
+        scale_dependent_sockets = {
+            "Offset",
+            "Text Size",
+            "Text Gap",
+            "Scale",
+            "Radius",
+            "Line Thickness",
+            "Ref Line Thickness",
+            "Conn Line Thickness",
+            "Arrowhead Width",
+            "Arrowhead Length",
+            "Point Radius",
+            "Text Thickness",
+        }
+
+        # Dynamic mapping of enum strings to their indices on the modifier
+        def get_enum_value(socket_name, identifier, value_str, default_idx):
+            try:
+                items = mod.id_properties_ui(identifier).as_dict().get('items', [])
+                for item in items:
+                    if item[0] == value_str or item[1] == value_str:
+                        return item[4]
+            except Exception:
+                pass
+
+            static_maps = {
+                "Output Type": {
+                    "Grease Pencil": 2,
+                    "Mesh": 3,
+                },
+                "Unit_Distance": {
+                    "Meter": 2,
+                    "Foot": 3,
+                    "Inch": 4,
+                    "Foot-Inch": 5,
+                    "Vector": 6,
+                },
+                "Unit_Angle": {
+                    "Degree": 2,
+                    "Radian": 3,
+                }
+            }
+            return static_maps.get(socket_name, {}).get(value_str, default_idx)
+
+        for item in mod.node_group.interface.items_tree:
+            if item.item_type != "SOCKET" or item.in_out != "INPUT":
+                continue
+            
+            socket_name = item.name
+            
+            # Unit special cases
+            if socket_name == "Unit":
+                if "Distance" in mod.node_group.name:
+                    val_str = self.session_params.get("Unit_Distance", "Meter")
+                    val = get_enum_value("Unit_Distance", item.identifier, val_str, 2)
+                else:
+                    val_str = self.session_params.get("Unit_Angle", "Degree")
+                    val = get_enum_value("Unit_Angle", item.identifier, val_str, 2)
+            elif socket_name == "Output Type":
+                val_str = self.session_params.get("Output Type", "Grease Pencil")
+                val = get_enum_value("Output Type", item.identifier, val_str, 2)
+            else:
+                val = self.session_params.get(socket_name)
+
+            if val is not None:
+                # If relative mode, scale length-dependent properties
+                if is_relative and socket_name in scale_dependent_sockets:
+                    if isinstance(val, (int, float)):
+                        val = val * actual_length
+
+                # Handle color tuple conversion if needed
+                if item.socket_type == 'NodeSocketColor':
+                    val = list(val)
+
+                try:
+                    mod[item.identifier] = val
+                except Exception as e:
+                    print(f"Failed to set modifier parameter {socket_name}: {e}")
+
+        # Force update
+        mod.show_viewport = False
+        mod.show_viewport = True
+        context.view_layer.update()
+        if context.area:
+            context.area.tag_redraw()
+
     def set_modifier_value(
         self, context, keyword, value, valid_types, toggle_flip=False
     ):
         """Unified method to set/toggle modifier values and update viewport."""
         mod, target_id, name = self.get_target_socket(keyword, valid_types)
-        if not mod or not target_id:
+        if not mod or not name:
             return
 
         try:
-            curr_val = mod.get(target_id)
+            curr_val = self.session_params.get(name)
+            if curr_val is None:
+                curr_val = mod.get(target_id)
+            
             final_val = value
 
             if toggle_flip and isinstance(curr_val, (int, float)):
@@ -219,29 +392,28 @@ class BaseDrawTool(Operator):
                     final_val = target_int
 
             if isinstance(final_val, float):
-                final_val = round(final_val, 2)
+                final_val = round(final_val, 4)
 
             # Type preservation
             if isinstance(curr_val, int) and isinstance(final_val, float):
                 final_val = int(round(final_val))
 
-            mod[target_id] = final_val
+            # Store in session parameters
+            self.session_params[name] = final_val
             self.report({"INFO"}, f"{name}: {final_val}")
 
-            # Force update
-            mod.show_viewport = False
-            mod.show_viewport = True
-            context.view_layer.update()
-            if context.area:
-                context.area.tag_redraw()
+            # Re-apply updated parameters to the modifier
+            self.apply_session_params_to_modifier(context)
 
         except Exception as e:
             print(f"Set '{name}' failed: {e}")
 
     def adjust_parameter(self, context, keyword, step, valid_types):
-        mod, target_id, _ = self.get_target_socket(keyword, valid_types)
-        if mod and target_id:
-            curr = mod.get(target_id, 0)
+        mod, target_id, name = self.get_target_socket(keyword, valid_types)
+        if mod and name:
+            curr = self.session_params.get(name)
+            if curr is None:
+                curr = mod.get(target_id, 0)
             self.set_modifier_value(context, keyword, curr + step, valid_types)
 
     @classmethod

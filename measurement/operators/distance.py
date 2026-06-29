@@ -45,6 +45,7 @@ class MOUSE_OT_draw_distance(BaseDrawTool):
         target_group = get_asset_nodegroup("Distance Measurement")
         if target_group:
             create_wrapper_modifier(self.obj, target_group)
+            self.apply_session_params_to_modifier(context)
         context.view_layer.objects.active = self.obj
 
     def align_to_geometry(self, context):
@@ -161,6 +162,7 @@ class MOUSE_OT_draw_distance(BaseDrawTool):
                 local_loc = inv @ loc
                 self.obj.data.vertices[1].co = local_loc
                 self.obj.data.update()
+                self.apply_session_params_to_modifier(context)
             return {"RUNNING_MODAL"}
 
         elif event.type == "LEFTMOUSE" and event.value == "PRESS":

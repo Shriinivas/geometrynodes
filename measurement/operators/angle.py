@@ -129,12 +129,14 @@ class MOUSE_OT_draw_angle(BaseDrawTool):
                     target_group = get_asset_nodegroup("Angle Measurement")
                     if target_group:
                         create_wrapper_modifier(self.obj, target_group)
+                        self.apply_session_params_to_modifier(context)
                     self.phase = 2
                     self.waiting_for_move = False
 
             if self.drawing and self.obj:
                 target_idx = 1 if self.phase == 1 else 2
                 self.update_geometry(loc, target_idx)
+                self.apply_session_params_to_modifier(context)
             return {"RUNNING_MODAL"}
 
         elif event.type == "LEFTMOUSE" and event.value == "PRESS":
