@@ -269,6 +269,39 @@ class BaseDrawTool(Operator):
         else:
             return (v1 - v0).length
 
+    def get_angle_info(self):
+        """Returns the angle (in degrees) and the shorter leg length of the angle."""
+        if not self.obj or len(self.obj.data.vertices) < 2:
+            return 0.0, 1.0
+        
+        verts = self.obj.data.vertices
+        mw = self.obj.matrix_world
+        w0 = mw @ verts[0].co
+        w1 = mw @ verts[1].co # Corner/Vertex
+        
+        if len(verts) < 3:
+            return 0.0, (w1 - w0).length
+            
+        w2 = mw @ verts[2].co
+        
+        u = w0 - w1
+        v = w2 - w1
+        
+        u_len = u.length
+        v_len = v.length
+        
+        if u_len < 0.0001 or v_len < 0.0001:
+            return 0.0, 0.0
+            
+        import math
+        cos_angle = u.dot(v) / (u_len * v_len)
+        cos_angle = max(-1.0, min(1.0, cos_angle))
+        angle_rad = math.acos(cos_angle)
+        angle_deg = math.degrees(angle_rad)
+        
+        shorter_len = min(u_len, v_len)
+        return angle_deg, shorter_len
+
     def apply_session_params_to_modifier(self, context):
         if not self.obj:
             return
@@ -299,6 +332,26 @@ class BaseDrawTool(Operator):
             "Point Radius",
             "Text Thickness",
         }
+
+        angle_scale_sockets = {
+            "Offset",
+            "Text Size",
+            "Text Gap",
+            "Radius",
+            "Arrowhead Width",
+            "Arrowhead Length",
+            "Point Radius",
+        }
+
+        angle_scale = 1.0
+        shorter_len = actual_length
+        if self.tool_type == "angle":
+            angle_deg, shorter_len = self.get_angle_info()
+            if len(self.obj.data.vertices) >= 3:
+                ref_angle = 45.0
+                min_angle = 10.0
+                clamped_angle = max(min_angle, min(ref_angle, angle_deg))
+                angle_scale = clamped_angle / ref_angle
 
         # Dynamic mapping of enum strings to their indices on the modifier
         def get_enum_value(socket_name, identifier, value_str, default_idx):
@@ -354,6 +407,14 @@ class BaseDrawTool(Operator):
                 if is_relative and socket_name in scale_dependent_sockets:
                     if isinstance(val, (int, float)):
                         val = val * actual_length
+
+                # Angle-specific scaling and constraints
+                if self.tool_type == "angle":
+                    if socket_name in angle_scale_sockets:
+                        if isinstance(val, (int, float)):
+                            val = val * angle_scale
+                    if socket_name == "Radius":
+                        val = min(val, shorter_len)
 
                 # Handle color tuple conversion if needed
                 if item.socket_type == 'NodeSocketColor':
