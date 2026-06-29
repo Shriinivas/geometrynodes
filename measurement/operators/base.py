@@ -333,25 +333,24 @@ class BaseDrawTool(Operator):
             "Text Thickness",
         }
 
-        angle_scale_sockets = {
-            "Offset",
-            "Text Size",
-            "Text Gap",
-            "Radius",
-            "Arrowhead Width",
-            "Arrowhead Length",
-            "Point Radius",
+        # Reference angles for different socket groups to maintain perfect proportions
+        socket_ref_angles = {
+            "Radius": 90.0,
+            "Arrowhead Length": 90.0,
+            "Offset": 75.0,
+            "Arrowhead Width": 75.0,
+            "Line Thickness": 75.0,
+            "Ref Line Thickness": 75.0,
+            "Conn Line Thickness": 75.0,
+            "Text Thickness": 75.0,
+            "Point Radius": 75.0,
+            "Text Size": 60.0,
+            "Text Gap": 60.0,
         }
 
-        angle_scale = 1.0
-        shorter_len = actual_length
+        angle_deg, shorter_len = 0.0, actual_length
         if self.tool_type == "angle":
             angle_deg, shorter_len = self.get_angle_info()
-            if len(self.obj.data.vertices) >= 3:
-                ref_angle = 45.0
-                min_angle = 10.0
-                clamped_angle = max(min_angle, min(ref_angle, angle_deg))
-                angle_scale = clamped_angle / ref_angle
 
         # Dynamic mapping of enum strings to their indices on the modifier
         def get_enum_value(socket_name, identifier, value_str, default_idx):
@@ -410,7 +409,11 @@ class BaseDrawTool(Operator):
 
                 # Angle-specific scaling and constraints
                 if self.tool_type == "angle":
-                    if socket_name in angle_scale_sockets:
+                    if socket_name in socket_ref_angles:
+                        ref_angle = socket_ref_angles[socket_name]
+                        min_angle = 10.0
+                        clamped_angle = max(min_angle, min(ref_angle, angle_deg))
+                        angle_scale = clamped_angle / ref_angle
                         if isinstance(val, (int, float)):
                             val = val * angle_scale
                     if socket_name == "Radius":
