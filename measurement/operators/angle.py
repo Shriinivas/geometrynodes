@@ -169,6 +169,7 @@ class MOUSE_OT_draw_angle(BaseDrawTool):
                     self.pending_point_loc = loc
                     self.waiting_for_move = True
                 elif self.phase == 2:
+                    self.remove_draw_handlers(context)
                     return {"FINISHED"}
                 return {"RUNNING_MODAL"}
 

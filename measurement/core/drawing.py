@@ -10,6 +10,10 @@ from ..constants import get_bindings_for_tool
 
 def draw_callback_px(self, context):
     """Draw cursor point indicator."""
+    try:
+        self.as_pointer()
+    except ReferenceError:
+        return
     if not self.mouse_loc_3d:
         return
     try:
@@ -28,6 +32,10 @@ def draw_callback_px(self, context):
 
 def draw_help_overlay(self, context):
     """Draw help text overlay showing keybindings for active tool."""
+    try:
+        self.as_pointer()
+    except ReferenceError:
+        return
     if not hasattr(self, 'tool_type') or not self.tool_type:
         return
     

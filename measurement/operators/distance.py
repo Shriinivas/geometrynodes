@@ -180,6 +180,7 @@ class MOUSE_OT_draw_distance(BaseDrawTool):
                     self.waiting_for_move = True
                 return {"RUNNING_MODAL"}
             else:
+                self.remove_draw_handlers(context)
                 return {"FINISHED"}
 
         elif event.type == "E" and event.value == "PRESS":

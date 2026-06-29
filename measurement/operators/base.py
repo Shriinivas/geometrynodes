@@ -136,17 +136,35 @@ class BaseDrawTool(Operator):
         self.mouse_loc_3d = final_loc
         return final_loc
 
-    def cancel_op(self, context):
+    def remove_draw_handlers(self, context):
+        """Cleanly remove the view draw handlers."""
         if self._handle:
-            bpy.types.SpaceView3D.draw_handler_remove(self._handle, "WINDOW")
+            try:
+                bpy.types.SpaceView3D.draw_handler_remove(self._handle, "WINDOW")
+            except Exception:
+                pass
             self._handle = None
         if self._help_handle:
-            bpy.types.SpaceView3D.draw_handler_remove(self._help_handle, "WINDOW")
+            try:
+                bpy.types.SpaceView3D.draw_handler_remove(self._help_handle, "WINDOW")
+            except Exception:
+                pass
             self._help_handle = None
-        if self.obj:
-            bpy.data.objects.remove(self.obj, do_unlink=True)
-        if context.area:
+        if context and context.area:
             context.area.tag_redraw()
+
+    def cancel(self, context):
+        """Called by Blender when modal operator finishes or cancels."""
+        self.remove_draw_handlers(context)
+
+    def cancel_op(self, context):
+        self.remove_draw_handlers(context)
+        if self.obj:
+            try:
+                bpy.data.objects.remove(self.obj, do_unlink=True)
+            except Exception:
+                pass
+            self.obj = None
 
     def is_over_ui(self, context, event):
         """Check if mouse is over UI elements."""
