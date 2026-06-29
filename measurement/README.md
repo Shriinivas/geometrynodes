@@ -68,11 +68,20 @@ Drag and drop the **"Distance Measurement"** or **"Angle Measurement"** objects 
 *   **Make Local**: Select the object and go to **Object > Relations > Make Local > All**.
 *   **Edit**: You can then edit the object (e.g. move vertices) to define the measurement points.
 
-## Configuration including overlay position
+## Configuration & Defaults
 
-Go to **Edit > Preferences > Add-ons > Measure Tools** to:
-*   Toggle the **Help Overlay** visibility by default.
-*   Adjust the **X / Y Position** of the help text (default: Bottom-Left).
+Go to **Edit > Preferences > Add-ons > Measure Tools** to customize:
+*   **Help Overlay**: Toggle default visibility and set screen position offsets (X/Y).
+*   **Scroll Increments**: Configure rotation and distance/offset step sizes for mouse-wheel adjustments.
+*   **Default Modifier Inputs**: Define default values for all modifier inputs (e.g., text size, unit type, line thickness, colors) to be applied automatically when new measurements are created.
+*   **Measurement Mode**:
+    *   **Absolute**: Modifier inputs use the exact values defined in the preferences.
+    *   **Relative**: Values represent dimensions for 1 unit length and adjust dynamically during drawing based on the actual world-space length.
+
+## Smart Features
+
+*   **Dynamic Angle Scaling**: Text size, line thickness, gaps, and arrowheads scale down proportionally for narrow angles (clamped to a minimum of 10° for legibility) to prevent overlapping and fit cleanly between the two lines.
+*   **Hanging Arc Prevention**: The angle arc radius is automatically capped at the length of the shorter of the two lines, ensuring the arc never extends past either leg.
 
 ## Notes
 
