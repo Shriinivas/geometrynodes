@@ -322,7 +322,6 @@ class BaseDrawTool(Operator):
             "Offset",
             "Text Size",
             "Text Gap",
-            "Scale",
             "Radius",
             "Line Thickness",
             "Ref Line Thickness",
